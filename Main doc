@@ -1,0 +1,140 @@
+Modsecurity Installation Guide
+
+
+At first update the system: sudo apt update
+
+Install Apache2 on the server: sudo apt install apache2
+Step 1: Install ModSecurity with Apache on Debian/Ubuntu
+
+The ModSecurity module for Apache is included in the default Debian/Ubuntu repository. To install it, run
+sudo apt install libapache2-mod-security2
+
+Then enable this module.
+sudo a2enmod security2
+
+Restart Apache for the change to take effect.
+sudo systemctl restart apache2
+
+Step 2: Configure ModSecurity
+
+In the /etc/apache2/mods-enabled/security2.conf configuration file, you can find the following line.
+
+IncludeOptional /etc/modsecurity/*.conf
+
+We need to rename the modsecurity.conf-recommended file to make it work.
+sudo mv /etc/modsecurity/modsecurity.conf-recommended /etc/modsecurity/modsecurity.conf
+
+Then edit this file with a command-line text editor like Nano.
+sudo nano /etc/modsecurity/modsecurity.conf
+
+Find the following line.
+SecRuleEngine DetectionOnly
+
+This config tells ModSecurity to log HTTP transactions, but takes no action when an attack is detected. Change it to the following, so ModSecurity will detect and block web attacks.
+SecRuleEngine On
+
+Then find the following line (line 186), which tells ModSecurity what information should be included in the audit log.
+SecAuditLogParts ABDEFHIJZ
+
+However, the default setting is wrong. You will know why later when I explain how to understand ModSecurity logs. The setting should be changed to the following.
+SecAuditLogParts ABCEFHJKZ
+
+Save and close the file. Then restart Apache for the change to take effect. (Reloading the web server isn’t enough.)
+sudo systemctl restart apache2
+
+Step 3: Install the OWASP Core Rule Set (CRS)
+
+Download the latest OWASP CRS from GitHub.
+wget https://github.com/coreruleset/coreruleset/archive/v3.3.0.tar.gz
+
+Extract the file.
+tar xvf v3.3.0.tar.gz
+
+Create a directory to store CRS files.
+sudo mkdir /etc/apache2/modsecurity-crs/
+
+Move the extracted directory to /etc/apache2/modsecurity-crs/.
+sudo mv coreruleset-3.3.0/ /etc/apache2/modsecurity-crs/
+
+Go to that directory.
+cd /etc/apache2/modsecurity-crs/coreruleset-3.3.0/
+
+Rename the crs-setup.conf.example file.
+sudo mv crs-setup.conf.example crs-setup.conf
+
+Edit the /etc/apache2/mods-enabled/security2.conf file.
+sudo nano /etc/apache2/mods-enabled/security2.conf
+Find the following line, which loads the default CRS files.
+IncludeOptional /usr/share/modsecurity-crs/*.load
+
+Change it to the following, so the latest OWASP CRS will be used.
+IncludeOptional /etc/apache2/modsecurity-crs/coreruleset-3.3.0/crs-setup.conf
+IncludeOptional /etc/apache2/modsecurity-crs/coreruleset-3.3.0/rules/*.conf
+
+
+Save and close the file. Then test Apache configuration.
+sudo apache2ctl -t
+
+If the syntax is OK, then restart Apache.
+sudo systemctl restart apache2
+
+
+Step 4: Test If Modsecurity is working properly
+
+Below is a test example of how you can use ModSecurity to block specific keywords on a PHP form.
+
+1. Create a PHP file inside the html directory with the command:
+
+sudo nano /var/www//html/test.php
+
+2. Enter the following code into the file:
+
+<html>
+<body>
+<?php
+if(isset($_POST['data']))
+echo $_POST['data'];
+else
+{
+?>
+<form method="post" action="">
+Enter text here:<textarea name="data"></textarea>
+<input type="submit"/>
+</form>
+<?php
+}
+?>
+</body>
+</html>
+
+Save the file and exit.
+
+Reload the Apache service:
+sudo systemctl restart apache2
+
+Launch the form in a web browser
+
+http://<Server IP>/test.php
+
+Try an XSS on the form and check if it gives a 403 forbidden response or not.
+
+Step 5: Create Custom rules
+
+Next, create a new ModSecurity custom rules file:
+
+sudo nano /etc/modsecurity/modsecurity_custom_rules.conf
+
+Add the following lines:
+
+SecRule REQUEST_FILENAME "test.php" "id:'400001',chain,deny,log,msg:'Spam detected'"
+SecRule REQUEST_METHOD "POST" chain
+SecRule REQUEST_BODY "@rx (?i:(enlarge|Nigerian|gold))"
+
+Of course, change the keywords in the last line to anything you want.
+
+Save the file and exit.
+
+ Reload the Apache service:
+
+sudo systemctl restart apache2
+
